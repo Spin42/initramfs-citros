@@ -1,0 +1,7 @@
+PRETTY_NAME="citrOS alpha"
+NAME="citrOS"
+VARIANT="initrd"
+VERSION_ID="aplha"
+VERSION="alpha"
+ID="citros"
+ID_LIKE="buildroot"

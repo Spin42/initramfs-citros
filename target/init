@@ -1,0 +1,58 @@
+#!/bin/sh
+# shellcheck disable=SC1091
+
+# Export all variables so they're available in /init_2nd.sh
+set -a
+
+LOG_PREFIX="[CitrOS-rd]"
+
+[ -e /hooks/10-verbose-initfs.sh ] && set -x
+
+[ -e /etc/unudhcpd.conf ] && . /etc/unudhcpd.conf
+. ./functions.sh
+. /usr/share/misc/source_deviceinfo
+[ -e /etc/os-release ] && . /etc/os-release
+# provide a default for os-release's VERSION in case the file doesn't exist
+VERSION="${VERSION:-unknown}"
+
+INITRAMFS_PKG_VERSION="0.0.1"
+
+echo "Starting initramfs..."
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+/bin/busybox --install -s
+/bin/busybox-extras --install -s
+
+echo "Mounting proc sys dev..."
+mount_proc_sys_dev
+
+echo "Setup logging..."
+setup_log
+
+echo "Setup firmware path..."
+setup_firmware_path
+
+echo "Launch mdev..."
+setup_mdev
+
+echo "Load relevant modules...."
+load_modules /lib/modules/initramfs.load
+
+echo "Kill mdev since it's not needed anymore..."
+kill mdev 2>/dev/null
+
+echo "Mapping subpartitions..."
+map_subpartitions
+
+echo "Mounting rootfs partition..."
+mount_rootfs
+
+echo "Restore consoles to original state..."
+restore_consoles
+
+echo "Switching to /sysroot"
+if ! exec switch_root /sysroot /sbin/init; then
+    echo "switch_root failed, continuing execution..."
+fi
+
+echo "Something went wrong, launching debug_console..."
+fail_halt_boot
