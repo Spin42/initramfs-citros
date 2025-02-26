@@ -2,7 +2,7 @@
 
 This is a basic initramfs. It's a stripped down version of the postmarketOS initramfs adapted for the needs of running different OS types on obsolete android phones.
 
-It will use the `rootfs=` kernel commandline param to device what to do. If it has the form `/dev/mmcblkXpY` it will simply mount it as the rootfs and switchroot to it. If it is of the form '/dev/mmcblkXpYpZ`, meaning that a complete disk was flashed to an existing android partition, it will invoke `kpartx` to map the subpartitions, then mount the root filesystem and switchroot to it.
+It will use the `rootfs=` kernel commandline param to device what to do. If it has the form `/dev/mmcblkXpY` it will simply mount it as the rootfs and switchroot to it. If it is of the form `/dev/mmcblkXpYpZ`, meaning that a complete disk was flashed to an existing android partition, it will invoke `kpartx` to map the subpartitions, then mount the root filesystem and switchroot to it.
 
 ## Building for a device
 
