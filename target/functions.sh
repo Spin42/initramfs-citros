@@ -77,7 +77,7 @@ setup_log() {
     # as to the kernel ringbuffer and pstore (if available).
     # Process substitution is technically non-POSIX, but is supported by busybox
     # shellcheck disable=SC3001
-    exec > >(tee /citronics_init.log "$pmsg" "$console" | logger -t "$LOG_PREFIX" -p user.info) 2>&1
+    exec > >(tee /citros_init.log "$pmsg" "$console" | logger -t "$LOG_PREFIX" -p user.info) 2>&1
 }
 
 mount_proc_sys_dev() {
@@ -393,8 +393,8 @@ restore_consoles() {
     # were stashed
     if [ -e "/proc/1/fd/3" ]; then
         exec 1>&3 2>&4
-    elif ! grep -q "citronics.debug-shell" /proc/cmdline; then
-        echo "$LOG_PREFIX Disabling console output again (use 'citronics.debug-shell' to keep it enabled)"
+    elif ! grep -q "citros.debug-shell" /proc/cmdline; then
+        echo "$LOG_PREFIX Disabling console output again (use 'citros.debug-shell' to keep it enabled)"
         exec >/dev/null 2>&1
     fi
 
