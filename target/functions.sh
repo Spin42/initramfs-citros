@@ -134,13 +134,6 @@ fail_halt_boot() {
 
 debug_shell() {
     echo "Entering debug shell"
-    # if we have a UDC it's already been configured for USB networking
-    local have_udc
-    have_udc="$(cat $CONFIGFS/g1/UDC)"
-
-    if [ -n "$have_udc" ]; then
-        setup_usb_acm_configfs
-    fi
 
     # mount pstore, if possible
     if [ -d /sys/fs/pstore ]; then
@@ -151,6 +144,9 @@ debug_shell() {
     # make a symlink like Android recoveries do
     ln -s /sys/kernel/debug /d
 
+    setup_usb_network
+    start_unudhcpd
+
 	cat <<-EOF > /README
 	citrOS debug shell
 
@@ -159,35 +155,13 @@ debug_shell() {
 	  OS ver: $VERSION
 	  initrd: $INITRAMFS_PKG_VERSION
 
-	Run 'citros_continue_boot' to continue booting.
 	Read the initramfs log with 'cat /citros_init.log'.
 	EOF
-
-    # Expose storage specified on cmdline on USB
-    local storage_dev=""
-    # shellcheck disable=SC2013
-    for x in $(cat /proc/cmdline); do
-        [ "$x" = "${x#citros.usb-storage=}" ] || storage_dev="${x#citros.usb-storage=}"
-    done
-
-    # Add citros_logdump message only if relevant
-    if [ -n "$have_udc" ]; then
-        echo "Run 'citros_logdump' to generate a log dump and expose it over USB." >> /README
-
-		cat <<-EOF >> /README
-		You can expose storage devices over USB with
-		'setup_usb_storage_configfs /dev/DEVICE'
-		EOF
-
-        if [ -n "$storage_dev" ]; then
-            echo "citros.usb-storage=$storage_dev is exposed over USB by default" >> /README
-        fi
-    fi
 
 	# Display some info
 	cat <<-EOF > /etc/profile
 	cat /README
-	. /init_functions.sh
+	. /functions.sh
 	EOF
 
 	cat <<-EOF > /sbin/citros_getty
@@ -240,56 +214,132 @@ debug_shell() {
         run_getty ttyGS0
     fi
 
-    # To avoid racing with the host PC opening the ACM port, we spawn
-    # the getty first. See the comment in run_getty for more details.
     setup_usb_configfs_udc
-
     # Spawn telnetd for those who prefer it. ACM gadget mode is not
     # supported on some old kernels so this exists as a fallback.
     telnetd -b "${HOST_IP}:23" -l /sbin/citros_getty &
-
-    # Set up USB mass storage if citros.usb-storage= was specified on cmdline
-    [ -z "$storage_dev" ] || setup_usb_storage_configfs "$storage_dev"
-
-    # wait until we get the signal to continue boot
-    while ! [ -e /tmp/continue_boot ]; do
-        sleep 0.2
-        if [ -e /tmp/dump_logs ]; then
-            rm -f /tmp/dump_logs
-            export_logs
-        fi
-    done
-
-    # Remove the ACM/mass storage gadget devices
-    # FIXME: would be nice to have a way to keep this on and
-    # pipe kernel/init logs to it.
-    rm -f $CONFIGFS/g1/configs/c.1/"$CONFIGFS_ACM_FUNCTION"
-    rmdir $CONFIGFS/g1/functions/"$CONFIGFS_ACM_FUNCTION"
-    rm -f "$CONFIGFS/g1/configs/c.1/$CONFIGFS_MASS_STORAGE_FUNCTION"
-    rmdir "$CONFIGFS/g1/functions/$CONFIGFS_MASS_STORAGE_FUNCTION"
-    setup_usb_configfs_udc
 }
 
-setup_usb_acm_configfs() {
-    active_udc="$(cat $CONFIGFS/g1/UDC)"
+setup_usb_network() {
+	# Only run once
+	_marker="/tmp/_setup_usb_network"
+	[ -e "$_marker" ] && return
+	touch "$_marker"
+	echo "Setup usb network"
+	modprobe libcomposite
+	setup_usb_network_configfs
+}
 
-    if ! [ -e "$CONFIGFS" ]; then
-        echo "  $CONFIGFS does not exist, can't set up serial gadget"
-        return 1
-    fi
+setup_usb_network_configfs() {
+	# See: https://www.kernel.org/doc/Documentation/usb/gadget_configfs.txt
+	local skip_udc="$1"
 
-    # unset UDC
-    echo "" > $CONFIGFS/g1/UDC
+	if ! [ -e "$CONFIGFS" ]; then
+		echo "$CONFIGFS does not exist, skipping configfs usb gadget"
+		return
+	fi
 
-    # Create acm function
-    mkdir "$CONFIGFS/g1/functions/$CONFIGFS_ACM_FUNCTION" \
-        || echo "  Couldn't create $CONFIGFS/g1/functions/$CONFIGFS_ACM_FUNCTION"
+	if [ -z "$(get_usb_udc)" ]; then
+		echo "  No UDC found, skipping usb gadget"
+		return
+	fi
 
-    # Link the acm function to the configuration
-    ln -s "$CONFIGFS/g1/functions/$CONFIGFS_ACM_FUNCTION" "$CONFIGFS/g1/configs/c.1" \
-        || echo "  Couldn't symlink $CONFIGFS_ACM_FUNCTION"
+	# Default values for USB-related deviceinfo variables
+	usb_idVendor="${deviceinfo_usb_idVendor:-0x18D1}"   # default: Google Inc.
+	usb_idProduct="${deviceinfo_usb_idProduct:-0xD001}" # default: Nexus 4 (fastboot)
+	usb_serialnumber="${deviceinfo_usb_serialnumber:-postmarketOS}"
+	usb_network_function="${deviceinfo_usb_network_function:-ncm.usb0}"
+	usb_network_function_fallback="rndis.usb0"
 
-    return 0
+	echo "  Setting up USB gadget through configfs"
+	# Create an usb gadet configuration
+	mkdir $CONFIGFS/g1 || echo "  Couldn't create $CONFIGFS/g1"
+	echo "$usb_idVendor"  > "$CONFIGFS/g1/idVendor"
+	echo "$usb_idProduct" > "$CONFIGFS/g1/idProduct"
+
+	# Create english (0x409) strings
+	mkdir $CONFIGFS/g1/strings/0x409 || echo "  Couldn't create $CONFIGFS/g1/strings/0x409"
+
+	# shellcheck disable=SC2154
+	echo "$deviceinfo_manufacturer" > "$CONFIGFS/g1/strings/0x409/manufacturer"
+	echo "$usb_serialnumber"        > "$CONFIGFS/g1/strings/0x409/serialnumber"
+	# shellcheck disable=SC2154
+	echo "$deviceinfo_name"         > "$CONFIGFS/g1/strings/0x409/product"
+
+	# Create network function.
+	if ! mkdir $CONFIGFS/g1/functions/"$usb_network_function"; then
+		# Try the fallback function next
+		if mkdir $CONFIGFS/g1/functions/"$usb_network_function_fallback"; then
+			usb_network_function="$usb_network_function_fallback"
+		fi
+	fi
+
+	# Create configuration instance for the gadget
+	mkdir $CONFIGFS/g1/configs/c.1 \
+		|| echo "  Couldn't create $CONFIGFS/g1/configs/c.1"
+	mkdir $CONFIGFS/g1/configs/c.1/strings/0x409 \
+		|| echo "  Couldn't create $CONFIGFS/g1/configs/c.1/strings/0x409"
+	echo "USB network" > $CONFIGFS/g1/configs/c.1/strings/0x409/configuration \
+		|| echo "  Couldn't write configration name"
+
+	# Link the network instance to the configuration
+	ln -s $CONFIGFS/g1/functions/"$usb_network_function" $CONFIGFS/g1/configs/c.1 \
+		|| echo "  Couldn't symlink $usb_network_function"
+
+	# If an argument was supplied then skip writing to the UDC (only used for mass storage
+	# log recovery)
+	if [ -z "$skip_udc" ]; then
+		setup_usb_configfs_udc
+	fi
+}
+
+start_unudhcpd() {
+	# Only run once
+	[ "$(pidof unudhcpd)" ] && return
+
+	# Skip if disabled
+	# shellcheck disable=SC2154
+	if [ "$deviceinfo_disable_dhcpd" = "true" ]; then
+		return
+	fi
+
+	local client_ip="${unudhcpd_client_ip:-172.16.42.2}"
+	echo "Starting unudhcpd with server ip $HOST_IP, client ip: $client_ip"
+
+	# Get usb interface
+	usb_network_function="${deviceinfo_usb_network_function:-ncm.usb0}"
+	usb_network_function_fallback="rndis.usb0"
+	if [ -n "$(cat $CONFIGFS/g1/UDC)" ]; then
+		INTERFACE="$(
+			cat "$CONFIGFS/g1/functions/$usb_network_function/ifname" 2>/dev/null ||
+			cat "$CONFIGFS/g1/functions/$usb_network_function_fallback/ifname" 2>/dev/null ||
+			echo ''
+		)"
+	else
+		INTERFACE=""
+	fi
+	if [ -n "$INTERFACE" ]; then
+		ifconfig "$INTERFACE" "$HOST_IP"
+	elif ifconfig rndis0 "$HOST_IP" 2>/dev/null; then
+		INTERFACE=rndis0
+	elif ifconfig usb0 "$HOST_IP" 2>/dev/null; then
+		INTERFACE=usb0
+	elif ifconfig eth0 "$HOST_IP" 2>/dev/null; then
+		INTERFACE=eth0
+	fi
+
+	if [ -z "$INTERFACE" ]; then
+		echo "  Could not find an interface to run a dhcp server on"
+		echo "  Interfaces:"
+		ip link
+		return
+	fi
+
+	echo "  Using interface $INTERFACE"
+	echo "  Starting the DHCP daemon"
+	(
+		unudhcpd -i "$INTERFACE" -s "$HOST_IP" -c "$client_ip"
+	) &
 }
 
 setup_usb_configfs_udc() {

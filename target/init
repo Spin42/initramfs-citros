@@ -46,13 +46,14 @@ map_subpartitions
 echo "Mounting rootfs partition..."
 mount_rootfs
 
-echo "Restore consoles to original state..."
-restore_consoles
+if mountpoint -q /sysroot; then
+    echo "Restore consoles to original state..."
+    restore_consoles
 
-echo "Switching to /sysroot"
-if ! exec switch_root /sysroot /sbin/init; then
-    echo "switch_root failed, continuing execution..."
+    echo "Switching to /sysroot"
+    exec switch_root /sysroot /sbin/init
+else
+    echo "Rootfs not mounted, launching debug_console..."
 fi
 
-echo "Something went wrong, launching debug_console..."
 fail_halt_boot
