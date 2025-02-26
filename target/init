@@ -40,20 +40,25 @@ load_modules /lib/modules/initramfs.load
 echo "Kill mdev since it's not needed anymore..."
 kill mdev 2>/dev/null
 
-echo "Mapping subpartitions..."
-map_subpartitions
+rootfs=$(get_kernel_param "rootfs")
+if [ -n "$rootfs" ]; then
+    echo "Mapping subpartitions..."
+    map_subpartitions
 
-echo "Mounting rootfs partition..."
-mount_rootfs
+    echo "Mounting rootfs partition..."
+    mount_rootfs
 
-if mountpoint -q /sysroot; then
-    echo "Restore consoles to original state..."
-    restore_consoles
+    if mountpoint -q /sysroot; then
+        echo "Restore consoles to original state..."
+        restore_consoles
 
-    echo "Switching to /sysroot"
-    exec switch_root /sysroot /sbin/init
+        echo "Switching to /sysroot"
+        exec switch_root /sysroot /sbin/init
+    else
+        echo "Rootfs not mounted, launching debug_console..."
+    fi
 else
-    echo "Rootfs not mounted, launching debug_console..."
+    echo "No rootfs parameter found, skipping rootfs mounting."
 fi
 
 fail_halt_boot
