@@ -12,3 +12,12 @@ Just type `./build.sh devices/your-device-of-choice` to get a .cpio.gz file that
 ## Modifying
 
 Just modify any files in the target directory and build afterwards.
+
+## Accessing the debug shell through usb
+
+The initramfs configures networking over usb. Your host will receive a specific ip address `172.16.42.2`.
+You can use telnet to open the debug shell from your computer.
+
+```bash
+telnet 172.16.42.1
+```
