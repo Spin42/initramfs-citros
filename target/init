@@ -49,6 +49,13 @@ if [ -n "$rootfs" ]; then
     mount_rootfs
 
     if mountpoint -q /sysroot; then
+    bootpart=$(get_kernel_param "bootpart")
+        if [ -n "$bootpart" ]; then
+            echo "Mounting boot partition..."
+            mount_boot_partition
+        else
+            echo "No bootpart parameter found, skipping boot partition mounting."
+        fi
         echo "Restore consoles to original state..."
         restore_consoles
 

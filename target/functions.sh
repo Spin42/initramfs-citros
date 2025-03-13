@@ -460,3 +460,26 @@ mount_rootfs() {
         echo "Device $rootfs_device not available after 10 seconds, cannot mount rootfs."
     fi
 }
+
+mount_boot_partition() {
+    local boot_partition
+    boot_partition=$(get_kernel_param "bootpart")
+
+    # Remove the /dev/ prefix if present
+    boot_partition=${boot_partition#/dev/}
+
+    # Wait for the boot partition to be available, with a timeout of 10 seconds
+    local boot_partition_device="/dev/$boot_partition"
+    local timeout=10
+    while [ ! -e "$boot_partition_device" ] && [ $timeout -gt 0 ]; do
+        echo "Waiting for $boot_partition_device to be available..."
+        sleep 1
+        timeout=$((timeout - 1))
+    done
+
+    if [ -e "$boot_partition_device" ]; then
+        mount "$boot_partition_device" /sysroot/boot
+    else
+        echo "Device $boot_partition_device not available after 10 seconds, cannot mount boot partition."
+    fi
+}
