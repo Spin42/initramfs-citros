@@ -56,8 +56,8 @@ if [ -n "$rootfs" ]; then
         else
             echo "No bootpart parameter found, skipping boot partition mounting."
         fi
-        echo "Restore consoles to original state..."
-        restore_consoles
+        # echo "Restore consoles to original state..."
+        # restore_consoles
 
         echo "Switching to /sysroot"
         exec switch_root /sysroot /sbin/init
